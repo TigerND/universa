@@ -43,9 +43,13 @@ public class Main {
 
     private AsyncEvent eventReady = new AsyncEvent();
     public final BufferedLogger logger = new BufferedLogger(4096);
-    private String configRoot;
+    private String configRoot = ".";
     private Thread hookThread;
     private EnvCache envCache;
+
+    private int networkVerboseLvl = DatagramAdapter.VerboseLevel.NOTHING;
+    private int networkUDPVerboseLvl = DatagramAdapter.VerboseLevel.NOTHING;
+    private int nodeVerboseLvl = DatagramAdapter.VerboseLevel.NOTHING;
 
     public static void main(String[] args) {
         new Main(args);
@@ -98,12 +102,8 @@ public class Main {
             }
             log(NAME_STRING);
 
-
             if(options.has("config")) {
-                loadNodeConfig();
-                loadNetConfig();
-
-                ledger.saveConfig(myInfo,netConfig,nodeKey);
+                configRoot = (String) options.valueOf("config");
             } else if(options.has("database")) {
                 ledger = new PostgresLedger((String) options.valueOf("database"));
                 log("ledger constructed");
@@ -149,10 +149,15 @@ public class Main {
             }
 
             log("--------------- step 3 --------------------");
+            loadNodeConfig();
+            loadNetConfig();
+            ledger.saveConfig(myInfo,netConfig,nodeKey);
+
+            log("--------------- step 4 --------------------");
             log("Starting the client HTTP server...");
             startClientHttpServer();
 
-            log("--------------- step 4 --------------------");
+            log("--------------- step 5 --------------------");
             log("Starting the Universa node service...");
             startNode();
 
@@ -160,6 +165,8 @@ public class Main {
             startAndWaitEnd();
         } catch (OptionException e) {
             usage("Unrecognized parameter: " + e.getMessage());
+        } catch (java.io.FileNotFoundException e) {
+            usage(e.getMessage());
         } catch (InterruptedException e) {
             e.printStackTrace();
             log("interrupted exception, leaving");
@@ -203,7 +210,12 @@ public class Main {
         });
 
         network = new NetworkV2(netConfig, myInfo, nodeKey);
+        network.setVerboseLevel(networkVerboseLvl);
+        network.setUDPVerboseLevel(networkUDPVerboseLvl);
+
         node = new Node(config, myInfo, ledger, network);
+        node.setVerboseLevel(nodeVerboseLvl);
+
         cache = node.getCache();
         parcelCache = node.getParcelCache();
         envCache = node.getEnvCache();
@@ -273,8 +285,8 @@ public class Main {
      * {@link DatagramAdapter.VerboseLevel#DETAILED}
      */
     public void setVerboseLevel(int level) {
-        network.setVerboseLevel(level);
-        node.setVerboseLevel(level);
+        networkVerboseLvl = level;
+        nodeVerboseLvl = level;
     }
 
     /**
@@ -284,7 +296,7 @@ public class Main {
      * {@link DatagramAdapter.VerboseLevel#DETAILED}
      */
     public void setUDPVerboseLevel(int level) {
-        network.setUDPVerboseLevel(level);
+        networkUDPVerboseLvl = level;
     }
 
     /**
@@ -309,7 +321,6 @@ public class Main {
 
     private void loadNodeConfig() throws IOException, SQLException {
         Yaml yaml = new Yaml();
-        configRoot = (String) options.valueOf("config");
 
         nodeKey = null;
         Binder settings = Binder.of(yaml.load(new FileInputStream(configRoot + "/config/config.yaml")));
