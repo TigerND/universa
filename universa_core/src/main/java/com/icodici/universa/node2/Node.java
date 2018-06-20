@@ -1101,7 +1101,9 @@ public class Node {
                 "ledgerSize", nodeStats.ledgerSize.isEmpty() ? 0 : nodeStats.ledgerSize.values().stream().reduce((i1, i2) -> i1 + i2).get(),
                 "smallIntervalApproved", nodeStats.smallIntervalApproved,
                 "bigIntervalApproved", nodeStats.bigIntervalApproved,
-                "uptimeApproved", nodeStats.uptimeApproved
+                "uptimeApproved", nodeStats.uptimeApproved,
+                "coreVersion", Core.VERSION,
+                "nodeNumber", myInfo.getNumber()
                 );
         if(showDays != null) {
             result.put("payments",nodeStats.getPaymentStats(ledger,showDays));
@@ -1128,6 +1130,10 @@ public class Node {
 
     public PublicKey getNodeKey() {
         return myInfo.getPublicKey();
+    }
+
+    public int getNumber() {
+        return myInfo.getNumber();
     }
 
     /// ParcelProcessor ///
@@ -3759,7 +3765,8 @@ public class Node {
 
         private final void resyncVote(NodeInfo node, ItemState state) {
 
-            //System.out.println("resyncVote at " + myInfo.getNumber() + " from " +node.getNumber() + " item " + hashId + " state " + state);
+            report(getLabel(), () -> concatReportMessage("resyncVote at " + myInfo.getNumber() + " from " +node.getNumber() + " item " + hashId + " state " + state),
+                    DatagramAdapter.VerboseLevel.DETAILED);
 
             boolean approvedConsenus = false;
             boolean revokedConsenus = false;

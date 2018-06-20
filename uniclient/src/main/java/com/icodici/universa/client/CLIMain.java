@@ -44,10 +44,7 @@ import net.sergeych.biserializer.BiDeserializer;
 import net.sergeych.biserializer.DefaultBiMapper;
 import net.sergeych.boss.Boss;
 import net.sergeych.collections.Multimap;
-import net.sergeych.tools.Binder;
-import net.sergeych.tools.Do;
-import net.sergeych.tools.FileTool;
-import net.sergeych.tools.Reporter;
+import net.sergeych.tools.*;
 import net.sergeych.utils.Base64;
 import org.yaml.snakeyaml.Yaml;
 
@@ -185,7 +182,7 @@ public class CLIMain {
                         .withValuesSeparatedBy(",")
                         .ofType(String.class)
                         .describedAs("file");
-                acceptsAll(asList("name", "o"), "Use with -e, --export or -i, --import commands. " +
+                acceptsAll(asList("output", "o"), "Use with -e, --export or -i, --import commands. " +
                         "Specify name of destination file.")
                         .withRequiredArg()
                         .ofType(String.class)
@@ -522,7 +519,7 @@ public class CLIMain {
 
         cleanNonOptionalArguments(sources);
 
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
         List updateFields = options.valuesOf("set");
         List updateValues = options.valuesOf("value");
 
@@ -551,7 +548,7 @@ public class CLIMain {
 
             // try sign
             if (name == null) {
-                name = source.replaceAll("(?i)\\.(yml|yaml)$", ".unicon");
+                name = new FilenameTool(source).setExtension("unicon").toString();
             }
             contract.seal();
             saveContract(contract, name);
@@ -570,7 +567,7 @@ public class CLIMain {
         cleanNonOptionalArguments(sources);
 
         List<String> formats = new ArrayList<String>((List) options.valuesOf("as"));
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
         List<String> extractKeyRoles = (List) options.valuesOf("extract-key");
         List extractFields = options.valuesOf("get");
         List updateFields = options.valuesOf("set");
@@ -601,12 +598,12 @@ public class CLIMain {
             HashMap<String, String> updateFieldsHashMap = new HashMap<>();
             Contract contract = loadContract(source);
             if (contract != null) {
-                try {
-                    for (int i = 0; i < updateFields.size(); i++) {
+                for (int i = 0; i < updateFields.size(); i++) {
+                    try {
                         updateFieldsHashMap.put((String) updateFields.get(i), (String) updateValues.get(i));
+                    } catch (Exception e) {
+                        addError(Errors.FAILURE.name(), (String) updateFields.get(i), "failed to set value " + (String) updateValues.get(i) + ": " + e.getMessage());
                     }
-                } catch (Exception e) {
-
                 }
                 if (updateFieldsHashMap.size() > 0) {
                     updateFields(contract, updateFieldsHashMap);
@@ -617,18 +614,18 @@ public class CLIMain {
                     for (int i = 0; i < extractKeyRoles.size(); i++) {
                         extractKeyRole = extractKeyRoles.get(i);
                         if (name == null) {
-                            name = source.replaceAll("(?i)\\.(unicon)$", ".pub");
+                            name = new FilenameTool(source).setExtension("pub").toString();
                         }
                         exportPublicKeys(contract, extractKeyRole, name, options.has("base64"));
                     }
                 } else if (extractFields != null && extractFields.size() > 0) {
                     if (name == null) {
-                        name = source.replaceAll("(?i)\\.(unicon)$", "_fields." + format);
+                        name = new FilenameTool(source).setExtension(format).addSuffixToBase("_fields").toString();
                     }
                     exportFields(contract, extractFields, name, format, options.has("pretty"));
                 } else {
                     if (name == null) {
-                        name = source.replaceAll("(?i)\\.(unicon)$", "." + format);
+                        name = new FilenameTool(source).setExtension(format).toString();
                     }
                     exportContract(contract, name, format, options.has("pretty"));
                 }
@@ -648,7 +645,7 @@ public class CLIMain {
 
         cleanNonOptionalArguments(sources);
 
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
         List updateFields = options.valuesOf("set");
         List updateValues = options.valuesOf("value");
 
@@ -671,12 +668,14 @@ public class CLIMain {
                     updateFields(contract, updateFieldsHashMap);
                 }
                 if (name == null) {
-                    name = source.replaceAll("(?i)\\.(json|xml|yml|yaml)$", ".unicon");
+                    name = new FilenameTool(source).setExtension("unicon").toString();
                 }
 
                 if(parentItems.size() > s) {
                     Contract parent = loadContract((String) parentItems.get(s));
-                    contract.addRevokingItems(parent);
+                    if(parent != null) {
+                        contract.addRevokingItems(parent);
+                    }
                 }
 
                 contract.seal();
@@ -801,7 +800,7 @@ public class CLIMain {
                                 StandardCopyOption.REPLACE_EXISTING,
                                 StandardCopyOption.ATOMIC_MOVE
                         };
-                        String tuDest = tuSource.replaceAll("(?i)\\.(unicon)$", "_rev" + tu.getRevision() + ".unicon");
+                        String tuDest = new FilenameTool(tuSource).addSuffixToBase("_rev" + tu.getRevision()).toString();
                         tuDest = FileTool.writeFileContentsWithRenaming(tuDest, new byte[0]);
                         if (tuDest != null) {
                             Files.move(Paths.get(tuSource), Paths.get(tuDest), copyOptions);
@@ -825,8 +824,6 @@ public class CLIMain {
 //                    registerContract(contract, (int) options.valueOf("wait"));
                     addError(Errors.COMMAND_FAILED.name(), tuSource, "payment contract or private keys for payment contract is missing");
                 }
-            } else {
-                addError(Errors.NOT_FOUND.name(), source, "contract non found or failed to load");
             }
         }
 
@@ -935,16 +932,28 @@ public class CLIMain {
                         addError("QUANTIZER_COST_LIMIT", contract.toString(), e.getMessage());
                     }
                     if(parcel != null) {
-                        report("save payment revision: " + parcel.getPaymentContract().getState().getRevision() + " id: " + parcel.getPaymentContract().getId());
+                        Contract newTUContract = parcel.getPaymentContract();
+                        report("save payment revision: " + newTUContract.getState().getRevision() + " id: " + newTUContract.getId());
 
                         CopyOption[] copyOptions = new CopyOption[]{
                                 StandardCopyOption.REPLACE_EXISTING,
                                 StandardCopyOption.ATOMIC_MOVE
                         };
-                        String tuDest = tuSource.replaceAll("(?i)\\.(unicon)$", "_rev" + tu.getRevision() + ".unicon");
+                        String tuDest = new FilenameTool(tuSource).addSuffixToBase("_rev" + tu.getRevision()).toString();
                         tuDest = FileTool.writeFileContentsWithRenaming(tuDest, new byte[0]);
-                        Files.move(Paths.get(tuSource), Paths.get(tuDest), copyOptions);
-                        saveContract(parcel.getPaymentContract(), tuSource,true, false);
+                        if (tuDest != null) {
+                            Files.move(Paths.get(tuSource), Paths.get(tuDest), copyOptions);
+                            if (saveContract(newTUContract, tuSource, true, false)) {
+                                ItemResult ir = registerParcel(parcel, (int) options.valueOf("wait"));
+                                if(ir.state != ItemState.APPROVED) {
+                                    addErrors(ir.errors);
+                                }
+                            } else {
+                                addError(Errors.COMMAND_FAILED.name(),tuSource,"unable to backup tu revision");
+                            }
+                        } else {
+                            addError(Errors.COMMAND_FAILED.name(),tuSource,"unable to backup tu revision");
+                        }
                     }
                 } else {
                     try {
@@ -971,7 +980,7 @@ public class CLIMain {
 
         List<String> nonOptions = new ArrayList<String>((List) options.nonOptionArguments());
 
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
 
         List parts = options.valuesOf("parts");
         if(parts == null)
@@ -994,9 +1003,7 @@ public class CLIMain {
                 Decimal value = new Decimal(contract.getStateData().getStringOrThrow(fieldName));
                 for(String filename : nonOptions) {
                     Contract contractToJoin = loadContract(filename,true);
-                    if(contractToJoin == null) {
-                        addError(Errors.NOT_FOUND.name(), filename, "contract non found or failed to load");
-                    } else {
+                    if(contractToJoin != null) {
                         value = value.add(new Decimal(contractToJoin.getStateData().getStringOrThrow(fieldName)));
                         contract.addRevokingItems(contractToJoin);
                     }
@@ -1022,36 +1029,35 @@ public class CLIMain {
                 contract.getStateData().set(fieldName,value);
                 contract.setCreatorKeys(keysMap().values());
 
-                String name;
+                FilenameTool nameTool;
                 if(partContracts != null) {
                     for (int i = 0; i < partContracts.length; i++) {
                         if(names.size() > i + 1) {
-                            name = names.get(i+1);
+                            nameTool = new FilenameTool(names.get(i+1));
                         } else {
                             if(names.size() > 0) {
-                                name = names.get(0);
+                                nameTool = new FilenameTool(names.get(0));
                             } else {
-                                name = source;
+                                nameTool = new FilenameTool(source);
                             }
-                            name = name.replace(".unicon","") + "_" + i +".unicon";
+                            nameTool.addSuffixToBase("_"+i);
                         }
-                        saveContract(partContracts[i], name, true, true);
+                        saveContract(partContracts[i], nameTool.toString(), true, true);
                     }
                 }
 
                 if(names.size() > 0) {
-                    name = names.get(0);
+                    nameTool = new FilenameTool(names.get(0));
                 } else {
-                    name = source.replace(".unicon","")+"_main.unicon";
+                    nameTool = new FilenameTool(source);
+                    nameTool.addSuffixToBase("_main");
                 }
 
-                saveContract(contract, name, true, true);
+                saveContract(contract, nameTool.toString(), true, true);
 
             } catch (Quantiser.QuantiserException e) {
                 addError("QUANTIZER_COST_LIMIT", contract.toString(), e.getMessage());
             }
-        } else {
-            addError(Errors.NOT_FOUND.name(), source, "contract non found or failed to load");
         }
 
         finish();
@@ -1068,7 +1074,7 @@ public class CLIMain {
         List siblingItems = options.valuesOf("add-sibling");
         List revokeItems = options.valuesOf("add-revoke");
         List referencedItems = options.valuesOf("add-referenced");
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
 
         for (int s = 0; s < sources.size(); s++) {
             String source = sources.get(s);
@@ -1142,7 +1148,7 @@ public class CLIMain {
                         int i = 1;
                         if (contract.getNewItems() != null) {
                             for (Approvable newItem : contract.getNewItems()) {
-                                String newItemFileName = source.replaceAll("(?i)\\.(unicon)$", "_new_item_" + i + ".unicon");
+                                String newItemFileName = new FilenameTool(source).addSuffixToBase("_new_item_" + i).toString();
                                 report("save newItem to " + newItemFileName);
     //                            ((Contract) newItem).seal();
                                 saveContract((Contract) newItem, newItemFileName);
@@ -1152,16 +1158,12 @@ public class CLIMain {
                         i = 1;
                         if (contract.getRevokingItems() != null) {
                             for (Approvable revokeItem : contract.getRevokingItems()) {
-                                String revokeItemFileName = source.replaceAll("(?i)\\.(unicon)$", "_revoke_" + i + ".unicon");
+                                String revokeItemFileName = new FilenameTool(source).addSuffixToBase("_revoke_" + i).toString();
                                 report("save revokeItem to " + revokeItemFileName);
-    //                            ((Contract) revokeItem).seal();
                                 saveContract((Contract) revokeItem, revokeItemFileName);
                                 i++;
                             }
                         }
-    //                    String parentFileName = source.replaceAll("(?i)\\.(unicon)$", "_parent.unicon");
-    //                    report("save parentFileName to " + parentFileName);
-    //                    saveContract(contract, parentFileName);
                     } else {
                         addErrors(contract.getErrors());
                     }
@@ -1228,7 +1230,7 @@ public class CLIMain {
     private static void doAnonymize() throws IOException {
         List<String> sources = new ArrayList<String>((List) options.valuesOf("anonymize"));
         List<String> roles = new ArrayList<String>((List) options.valuesOf("role"));
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
         List<String> nonOptions = new ArrayList<String>((List) options.nonOptionArguments());
         for (String opt : nonOptions) {
             sources.addAll(asList(opt.split(",")));
@@ -1252,7 +1254,7 @@ public class CLIMain {
                 if (names.size() > s) {
                     saveContract(contract, names.get(s), true, false);
                 } else {
-                    saveContract(contract, source.replaceAll("(?i)\\.(unicon)$", "_anonymized.unicon"), true, false);
+                    saveContract(contract, new FilenameTool(source).addSuffixToBase("_anonymized").toString(), true, false);
                 }
             }
         }
@@ -1366,7 +1368,7 @@ public class CLIMain {
             sources.remove("-tutest");
             sources.remove("--tutest");
         }
-        List<String> names = (List) options.valuesOf("name");
+        List<String> names = (List) options.valuesOf("output");
         if (names != null) {
             sources.removeAll(names);
             sources.remove("-name");
@@ -1988,7 +1990,7 @@ public class CLIMain {
 
             report(roleName + " export public keys ok");
         } else {
-            report("export public keys error, role does not exist: " + roleName);
+            addError(Errors.NOT_FOUND.name(), roleName, "role doesn't exist");
         }
     }
 
@@ -2028,10 +2030,20 @@ public class CLIMain {
         Binder hm = new Binder();
 
         try {
+            boolean isOk = true;
+
             for (String fieldName : fieldNames) {
-                report("export field: " + fieldName + " -> " + contract.get(fieldName));
-                hm.put(fieldName, contract.get(fieldName));
+                try {
+                    report("export field: " + fieldName + " -> " + contract.get(fieldName));
+                    hm.put(fieldName, contract.get(fieldName));
+                } catch (IllegalArgumentException e) {
+                    addError(Errors.FAILURE.name(),fieldName,"export field error: " + e.getMessage());
+                    isOk = false;
+                }
             }
+
+            if(!isOk)
+                return;
 
             Binder binder = DefaultBiMapper.getInstance().newSerializer().serialize(hm);
 
@@ -2062,7 +2074,7 @@ public class CLIMain {
             report("export fields as " + format + " ok");
 
         } catch (IllegalArgumentException e) {
-            report("export fields error: " + e.getMessage());
+            addError(Errors.FAILURE.name(),"exportFields","export fields error: " + e.getMessage());
         }
     }
 

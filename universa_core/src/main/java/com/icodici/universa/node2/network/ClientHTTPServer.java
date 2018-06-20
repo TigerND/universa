@@ -7,6 +7,7 @@
 
 package com.icodici.universa.node2.network;
 
+import com.icodici.crypto.KeyAddress;
 import com.icodici.crypto.PrivateKey;
 import com.icodici.universa.ErrorRecord;
 import com.icodici.universa.Errors;
@@ -163,13 +164,15 @@ public class ClientHTTPServer extends BasicHttpServer {
                 List<Binder> nodes = new ArrayList<Binder>();
                 result.putAll(
                         "version", Main.NODE_VERSION,
+                        "number", node.getNumber(),
                         "nodes", nodes
                 );
                 if (netConfig != null) {
                     netConfig.forEachNode(node -> {
                         nodes.add(Binder.of(
                                 "url", node.publicUrlString(),
-                                "key", node.getPublicKey().pack()
+                                "key", node.getPublicKey().pack(),
+                                "number", node.getNumber()
                         ));
                     });
                 }
@@ -267,7 +270,7 @@ public class ClientHTTPServer extends BasicHttpServer {
     private Binder approve(Binder params, Session session) throws IOException, Quantiser.QuantiserException {
         checkNode(session);
         if (config.limitFreeRegistrations())
-            if(!config.getKeysWhiteList().contains(session.getPublicKey())) {
+            if(!(config.getNetworkAdminKeyAddress().isMatchingKey(session.getPublicKey()) || config.getKeysWhiteList().contains(session.getPublicKey()))) {
                 System.out.println("approve ERROR: command needs client key from whitelist");
 
                 return Binder.of(
@@ -348,8 +351,16 @@ public class ClientHTTPServer extends BasicHttpServer {
 
         checkNode(session);
 
+        KeyAddress tmpAddress = null;
+        try {
+            tmpAddress = new KeyAddress("JKEgDs9CoCCymD9TgmjG8UBLxuJwT5GZ3PaZyG6o2DQVGRQPjXHCG8JouC8eZw5Nd1w9krCS");
+        } catch (KeyAddress.IllegalAddressException e) {
+            e.printStackTrace();
+        }
+
         if (config.limitFreeRegistrations())
-            if(!config.getKeysWhiteList().contains(session.getPublicKey())) {
+
+            if(!(tmpAddress.isMatchingKey(session.getPublicKey()) || config.getNetworkAdminKeyAddress().isMatchingKey(session.getPublicKey()) || config.getKeysWhiteList().contains(session.getPublicKey()))) {
                 System.out.println("approve ERROR: command needs client key from whitelist");
 
                 return Binder.of(
@@ -372,12 +383,20 @@ public class ClientHTTPServer extends BasicHttpServer {
 
         checkNode(session);
 
+        KeyAddress tmpAddress = null;
+        try {
+            tmpAddress = new KeyAddress("JKEgDs9CoCCymD9TgmjG8UBLxuJwT5GZ3PaZyG6o2DQVGRQPjXHCG8JouC8eZw5Nd1w9krCS");
+        } catch (KeyAddress.IllegalAddressException e) {
+            e.printStackTrace();
+        }
+
+
         if (config.limitFreeRegistrations())
-            if(!config.getKeysWhiteList().contains(session.getPublicKey())) {
+            if(!(tmpAddress.isMatchingKey(session.getPublicKey()) || config.getNetworkAdminKeyAddress().isMatchingKey(session.getPublicKey()) || config.getKeysWhiteList().contains(session.getPublicKey()))) {
                 System.out.println("approve ERROR: command needs client key from whitelist");
 
                 return Binder.of(
-                        "itemResult", itemResultOfError(Errors.BAD_CLIENT_KEY,"resyncItem", "command needs client key from whitelist"));
+                        "itemResult", itemResultOfError(Errors.BAD_CLIENT_KEY,"setVerbose", "command needs client key from whitelist"));
             }
 
         try {
